@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <script src = "http://static.robotwebtools.org/EventEmitter2/current/eventemitter2.js"></script>
+        <script src = "http://static.robotwebtools.org/roslibjs/current/roslib.js"></script>
+    </head>
+
+    <body>
+        <h1>Welcome <span id="usrGreeting"></span>, to the E-Bike Memory Seat Web App</h1>
+
+        <h3>Order your E-Bike with:</h3>
+        <form onchange="changeDivContentAdjustmentType()">
+            <label>Automatically adjusted seat height</label>
+            <input type="radio" id="autoRadio" name="adjustmentType">
+            <label>or Manually adjusted seat height:</label>
+            <input type="radio" id="manRadio" name="adjustmentType">
+        </form>
+
+        <div id="variableContentDiv"></div>
+
+        <p id="currentHeightOutput"></p>
+
+        <script src="js/EbmsWebClient.js"></script>
+    </body>
+</html>
