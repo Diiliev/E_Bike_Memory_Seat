@@ -4,6 +4,11 @@
 #include <string>
 #include "canTransmit.h"
 
+// 0x555 is the hex id of the ROS server
+// 0x111 is the hex id of the Arduino microcontroller
+#define CAN_ID_TO_SEND 0x555
+#define CAN_ID_TO_READ 0x111
+
 class SeatHeightAdjuster {
 
     protected:
@@ -19,93 +24,71 @@ class SeatHeightAdjuster {
         actionName(name)
         {
             actionServer.start();
-            feedback.currentHeight = 0;
         }
     
     ~SeatHeightAdjuster(void) { }
 
     void executeCB(const e_bike_memory_seat::adjustSeatHeightGoalConstPtr &goal) {
         ros::Rate rate(10);
-        bool operationSuccessful = true;
 
-        // TODO get the current seat height by querying the arduino mcu
-        // ...
-
-        ROS_INFO("Executing %s, current seat height is %i, wanted height is %i",
+        ROS_INFO("Executing %s, wanted height is %i",
             actionName.c_str(),
-            feedback.currentHeight,
             goal->wantedHeight
         );
 
-        // if the current height is already equal to the goal height,
+        // send the goal height to the microcontroller by publishing it to the CAN bus
+        if(!writeMessageToCan(goal->wantedHeight, CAN_ID_TO_SEND)) {
+            ROS_ERROR("There was an error writting message to CAN bus.");
+            actionServer.setAborted();
+            return;
+        }
+
+        // read the current height 
+        feedback.currentHeight = readMessageFromCanWithId(CAN_ID_TO_READ);
+
+        // if there was an error reading message from the CAN bus, abort the action
+        // ToDo what happens when reading is successful but the IDs don't match?
+        if (feedback.currentHeight == -1) {
+            ROS_ERROR("There was an error reading message from CAN bus.");
+            actionServer.setAborted();
+            return;
+        }
+
+        // keep reading and publishing the feedback messages sent from the microcontroller
+        // until the feedback height is equal to the goal wanted height
+        // or until the action is preempted
+        // or until the microcontroller returns error with -1
+        while (feedback.currentHeight != goal->wantedHeight) {
+            if (actionServer.isPreemptRequested()
+                || !ros::ok()
+                || feedback.currentHeight == -1) {
+
+                ROS_WARN("%s was preempted", actionName.c_str());
+                actionServer.setPreempted();
+                break;
+            }
+            feedback.currentHeight = readMessageFromCanWithId(CAN_ID_TO_READ);
+            actionServer.publishFeedback(feedback);
+            rate.sleep();
+
+            // TODO what happens if the arduino returns error during operation?
+            // maybe include status info in the messages.
+            // TODO what happens when the arduino is "resting" ?
+        }
+
+        // if the current height is equal to the goal height,
         // set the action status to succeeded.
         if (feedback.currentHeight == goal->wantedHeight) {
             actionServer.publishFeedback(feedback);
             result.finalHeight = feedback.currentHeight;
             ROS_INFO("%s Succeeded :)", actionName.c_str());
             actionServer.setSucceeded(result);
-        }
-
-        // If the current seat height is lower than the goal,
-        // lift the seat to the goal height.
-        else if (feedback.currentHeight < goal->wantedHeight) {
-
-            // Send raise seat command to the arduino mcu
-            writeMessageToCan(std::to_string(goal->wantedHeight), 'r');
-            
-            while (feedback.currentHeight < goal->wantedHeight) {
-                if (actionServer.isPreemptRequested() || !ros::ok()) {
-                    ROS_WARN("%s was preempted", actionName.c_str());
-                    actionServer.setPreempted();
-                    operationSuccessful = false;
-                    break;
-                }
-
-                // TODO read current height from the arduino
-                feedback.currentHeight++;
-
-                actionServer.publishFeedback(feedback);
-                rate.sleep();
-
-                // TODO if the arduino returns error during operation,
-                // set the action server status to aborted
-            }
-        }
-
-        // If the current seat height is higher than the goal,
-        // lower the seat to the goal height.
+        }     
         else {
-
-            // Send lower seat command to the arduino mcu
-            writeMessageToCan(std::to_string(goal->wantedHeight), 'l');
-
-            while (feedback.currentHeight > goal->wantedHeight) {
-                if (actionServer.isPreemptRequested() || !ros::ok()) {
-                    ROS_WARN("%s was preempted", actionName.c_str());
-                    actionServer.setPreempted();
-                    operationSuccessful = false;
-                    break;
-                }
-
-                // TODO read current height from the arduino
-                feedback.currentHeight--;
-
-                actionServer.publishFeedback(feedback);
-                rate.sleep();
-
-                // TODO if the arduino returns error during operation,
-                // set the action server status to aborted
-            }
-        }
-
-        if (operationSuccessful) {
+            ROS_WARN("%s not completed", actionName.c_str());
             result.finalHeight = feedback.currentHeight;
-            ROS_INFO("%s Succeeded :)", actionName.c_str());
-            actionServer.setSucceeded(result);
-
-            // dirty hack to stop the motor by sending 's' to MCU
-            writeMessageToCan(std::to_string(goal->wantedHeight), 's');
-        }        
+            actionServer.setAborted();
+        } 
     }
 };
 

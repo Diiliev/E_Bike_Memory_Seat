@@ -15,7 +15,8 @@
 #include <linux/can/raw.h>
 #include <ros/ros.h>
 
-void writeMessageToCan(std::string height, char direction);
+bool writeMessageToCan(int height, int canIdToSend);
+int readMessageFromCanWithId(int canIdToRead);
 
 
 #endif
