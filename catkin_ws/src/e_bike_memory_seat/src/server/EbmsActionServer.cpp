@@ -58,6 +58,8 @@ class SeatHeightAdjuster {
         // until the feedback height is equal to the goal wanted height
         // or until the action is preempted
         // or until the microcontroller returns error with -1
+        // TODO add timer condition
+        // TODO what if feedback overshoots goal and has to go in the other direction?
         while (feedback.currentHeight != goal->wantedHeight) {
             if (actionServer.isPreemptRequested()
                 || !ros::ok()
@@ -79,14 +81,13 @@ class SeatHeightAdjuster {
         // if the current height is equal to the goal height,
         // set the action status to succeeded.
         if (feedback.currentHeight == goal->wantedHeight) {
-            actionServer.publishFeedback(feedback);
             result.finalHeight = feedback.currentHeight;
             ROS_INFO("%s Succeeded :)", actionName.c_str());
             actionServer.setSucceeded(result);
         }     
         else {
             ROS_WARN("%s not completed", actionName.c_str());
-            result.finalHeight = feedback.currentHeight;
+            result.finalHeight = feedback.currentHeight; // TODO not sure if I should set result if the action is aborted. Test this out.
             actionServer.setAborted();
         } 
     }
