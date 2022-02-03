@@ -17,12 +17,12 @@ if (!window.indexedDB) {
 
 const sampleUserData = 
 {
-    email: "diiliev@tu-sofia.bg",
-    name: "Dimitar",
-    legLengthCm: 99,
+    email: "Sam@randomemail.com",
+    name: "Sam",
+    legLengthCm: 100,
     gender: "male",
-    weightKg: 92,
-    recommendedSeatHeightMm: 87,
+    weightKg: 90,
+    recommendedSeatHeightMm: 88,
     preferredSeatHeightMm: 100
 };
 
@@ -39,7 +39,7 @@ openDbRequest.onupgradeneeded = function(event) {
     database = event.target.result;
     var objectStore = database.createObjectStore("ebms_users_os", {keyPath: "email"});
     objectStore.add(sampleUserData);
-    console.log("Created new database and added sample user Dimitar.");
+    console.log("Created new database and added sample user Sam.");
 }
 // ------------- Initialisation complete ----------------
 // ------------------------------------------------------

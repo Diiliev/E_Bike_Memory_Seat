@@ -45,6 +45,7 @@ class SeatHeightAdjuster {
 
         // read the current height 
         feedback.currentHeight = readMessageFromCanWithId(CAN_ID_TO_READ);
+        ROS_INFO("feedback.currentHeight=%d",feedback.currentHeight);
 
         // if there was an error reading message from the CAN bus, abort the action
         // ToDo what happens when reading is successful but the IDs don't match?
