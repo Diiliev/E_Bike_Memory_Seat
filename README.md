@@ -42,7 +42,7 @@ Once the user has logged in, they can choose via radio button one of two options
 
 The ROS action server extracts the wanted seat height from the JSON message and writes it into a new CAN message before publishing it to the CAN bus. It then starts listening for feedback from the microcontroller on the CAN bus for the current seat height until it is equal to the wanted seat height. The ROS server sends the current seat height to the web server, where it is visualised for the user in real time. This allows the user to keep track of the status of their request.
 
-The Microcontroller has several important functions. It was already established that it reads messages from the CAN bus, drives the linear actuator acordingly and publish feedback to the CAN bus, however it has a few safety features as well. It protects the linear actuator from overheating by keeping track of how long it has been powered on and ensuring enough time is spent powered off. This time is calculated given the 25% duty cycle of the actuator, which means that for every second it spends powered on, 4 seconds are spent powered off. Another requirement of the actuator is the maximum duty operational time, which is 1 minute at nominal dynamic load. The microcontroller keeps track of that as well. Finally, the microcontroller also provides stall protection by reading the positional feedback of the actuator. If it does not move for more than 26ms while it is powered on then the microcontroller cuts its the power.
+The Microcontroller has several important functions. It was already established that it reads messages from the CAN bus, drives the linear actuator acordingly and publish feedback to the CAN bus, however it has a few safety features as well. It protects the linear actuator from overheating by keeping track of how long it has been powered on and ensuring enough time is spent powered off. This time is calculated given the 25% duty cycle of the actuator, which means that for every second it spends powered on, 4 seconds are spent powered off. Another requirement of the actuator is the maximum duty operational time, which is 1 minute at nominal dynamic load. The microcontroller keeps track of that as well. Finally, the microcontroller also provides stall protection by reading the positional feedback of the actuator. If it does not move for more than 26ms while it is powered on then the microcontroller cuts the power.
 
 
 ## How to build the project
@@ -72,9 +72,9 @@ $ sudo ifconfig can0 txqueuelen 1000
 ```
 $ source catkin_ws/devel/setup.bash
 ```
-setup.bash -- Environment setup file for Bash shell
-setup.sh   -- Environment setup file for Bourne shell
-setup.zsh  -- Environment setup file for zshell
+setup.bash -- Environment setup file for Bash shell<br />
+setup.sh   -- Environment setup file for Bourne shell<br />
+setup.zsh  -- Environment setup file for zshell<br />
 For more information visit the ros wiki [here](http://wiki.ros.org/catkin/workspaces#Source_Space).
 
 #### 3. Start the ROS core, action server and rosbridge websocket:
@@ -96,10 +96,10 @@ Open the [EbmsLoginPage](catkin_ws/src/e_bike_memory_seat/src/client/EbmsLoginPa
 
 ## How to set up the arduino microcontroller
 The code for the microcontroller is located in [this folder](catkin_ws/src/e_bike_memory_seat/src/microcontroller/EbmsMicrocontroller/EbmsMicrocontroller.ino).
-Verify and Upload it to your Arduino Uno microcontroller and proceed to the next section [## How to set up the physical test bench](#how-to-set-up-the-physical-test-bench) for wiring instructions.
+Verify and Upload it to your Arduino Uno microcontroller and proceed to the next section [## How to set up the test bench](#how-to-set-up-the-test-bench) for wiring instructions.
 
 ## How to set up the test bench
-Most of the components, excluding the power supply, are conveniently attached to the test bench. For wiring instructions one can refer to the detailed schematic diagram in the section [## How does it work?](#How-does-it-work?) or the simplified schematic diagram bellow:
+Most of the components, excluding the power supply, are conveniently attached to the test bench. For wiring instructions one can refer to the detailed schematic diagram in the section [## How does it work?](#how-does-it-work) or the simplified schematic diagram bellow:
 ![Simplified Schematic Diagram](/assets/EN/Simplified_Schematic_Diagram.png)
 
 The microcontroller can be powered externally, or it can be powered via USB connection to a computer. The second option allows us to reprogram the microcontroller as well, which makes it the better option for lab experiments. The computer marked as U1 can be replaced by a different brand and model, the most significant requirement is that it runs Ubuntu 18.04.6 LTS and ROS Melodic. Compatability with other versions of ROS and Ubuntu are not guarenteed.
@@ -125,7 +125,7 @@ $ cansend can0 111#57.00.00.00.00.00.00.00 //simulate the microcontroller sendin
 ```
 For more information visit the "mbedded blog" [here](https://blog.mbedded.ninja/programming/operating-systems/linux/how-to-use-socketcan-with-the-command-line-in-linux/).
 
-## Possible future improvements or educational tasks
+## Possible future improvements and educational tasks
 - Electronics
   - Add a display which provides useful information to the client such as:
     - Current-seat-height / goal-seat-height;
