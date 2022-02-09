@@ -63,6 +63,11 @@ For more information visit the ros wiki catkin tutorial [here](http://wiki.ros.o
 - Ubuntu 18.04.6 LTS
 - ROS Melodic
 #### 1. Setup your SocketCan interface
+Before you start you may want to list the network interfaces of your machine using:
+```
+$ ip link show
+```
+In our case the only CAN network interface is called "can0" and it belongs to our "PEAK - PCAN-USB CAN interface for USB". Let's set it up:
 ```
 $ sudo ip link set can0 down
 $ sudo ip link set can0 up type can bitrate 500000
@@ -105,7 +110,13 @@ Most of the components, excluding the power supply, are conveniently attached to
 The microcontroller can be powered externally, or it can be powered via USB connection to a computer. The second option allows us to reprogram the microcontroller as well, which makes it the better option for lab experiments. The computer marked as U1 can be replaced by a different brand and model, the most significant requirement is that it runs Ubuntu 18.04.6 LTS and ROS Melodic. Compatability with other versions of ROS and Ubuntu are not guarenteed.
 
 ## How to use the test bench
-Afer the components have been wired up and the programs have been started, open the [EbmsLoginPage](catkin_ws/src/e_bike_memory_seat/src/client/EbmsLoginPage.html) with a browser which supports IndexedDB. Enter the email address of the user which has been hardcoded in the [DatabaseFunctions.js](catkin_ws/src/e_bike_memory_seat/src/client/js/DatabaseFunctions.js) file. Then you will be redirected to the [EbmsWebClient](catkin_ws/src/e_bike_memory_seat/src/client/EbmsWebClient.html) page where you can choose automatic or manual seat height adjustment. Experiment with both options to see how they work. When you are ready click the "Order E-Bike" button. This will send your request to the backend web server which will forward it to the ROS action server until your desired seat height reaches the microcontroller. You can follow the transmission of messages through the browser console, the ROS topics and the microcontroller serial monitor. The list of ROS topics can be seen by typing:
+Afer the components have been wired up and the programs have been started, open the [EbmsLoginPage](catkin_ws/src/e_bike_memory_seat/src/client/EbmsLoginPage.html) with a browser which supports IndexedDB. Enter the email address of the user which has been hardcoded in the [DatabaseFunctions.js](catkin_ws/src/e_bike_memory_seat/src/client/js/DatabaseFunctions.js) file. Then you will be redirected to the [EbmsWebClient](catkin_ws/src/e_bike_memory_seat/src/client/EbmsWebClient.html) page where you can choose automatic or manual seat height adjustment. Experiment with both options to see how they work. <br /> 
+By the way if you change the user information found in the DatabaseFunctions.js and try to login with the new info it will probably fail, because your browser has remembered the old values. In this case you can either open an incognito window and login with your new user data from there or, if you want to use the web client from a normal window, you will have to delete the old database called "ebms_db" by opening your browser terminal with F12 and executing the following line:
+```
+>   indexedDB.deleteDatabase("ebms_db");
+```
+Next you have to reload the page and if the browser terminal is still open you should see a message similar to: "Created new database and added sample user {your new user}".<br />
+When you are ready click the "Order E-Bike" button. This will send your request to the backend web server which will forward it to the ROS action server until your desired seat height reaches the microcontroller. You can follow the transmission of messages through the browser console, the ROS topics and the microcontroller serial monitor. The list of ROS topics can be seen by typing:
 ```
 rostopic list
 ```

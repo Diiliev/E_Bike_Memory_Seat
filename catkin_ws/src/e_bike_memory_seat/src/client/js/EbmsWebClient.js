@@ -17,7 +17,7 @@ function changeDivContentAdjustmentType() {
         document.getElementById("variableContentDiv").innerHTML = 
            `<form id="autoForm">
                 <p>
-                    <span id="usrNameInAF"></span>, you have stated that your legs are
+                    <span id="usrNameInAF"></span>, you have stated that your inseam length is
                     <span id="legLengthInAF"></span>cm long. Therefor we recommend,
                     a seat height of <span id="recommendedSeatHeightInAF"></span>mm.
                 </p>
@@ -39,7 +39,7 @@ function changeDivContentAdjustmentType() {
         // Display manual seat adjustment form. User directly specifies his desired seat height.
         document.getElementById("variableContentDiv").innerHTML =
             `<form id="manForm">
-                <p>Enter your desired seat height: <input type="number" id="usrInput" min="0" max="150"> <i>(Seat height can be adjusted from 0 to 150mm)</i></p>
+                <p>Enter your desired seat height: <input type="number" id="usrInput" min="10" max="140"> <i>(Seat height can be adjusted from 10 to 140mm)</i></p>
                 <button type="submit">Order E-Bike</button>
             </form>`;
             document.getElementById("manForm").addEventListener("submit", handleManSubmitBtn);
@@ -51,9 +51,12 @@ function calculateSeatHeight() {
     const lemondConstant = 883;
     var calculatedSeatHeight = Math.round((usrLegLength * lemondConstant)/1000);
 
-    // The seat cannot be lifted higher than 150mm.
-    if (calculatedSeatHeight > 150) {
-        calculatedSeatHeight = 150;
+    // The seat cannot be lifted higher than 140mm or bellow 10mm.
+    if (calculatedSeatHeight > 140) {
+        calculatedSeatHeight = 140;
+    }
+    else if (calculatedSeatHeight < 10) {
+        calculatedSeatHeight = 10;
     }
     
     localStorage.setItem("activeUserRecommendedSeatHeight", calculatedSeatHeight);

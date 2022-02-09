@@ -10,10 +10,12 @@
 
 #define MOTOR_F 5
 #define MOTOR_B 6
-#define FEEDBACK 2
+#define FEEDBACK 0
 #define MAX_WORK_TIME 60000
-#define STALL_TIME 1000 // TODO should be 26ms. Anything else is for testing purposes.
+#define STALL_TIME 1000 // In theory this should be 26ms but in reality the time it takes to move the actuator with 1mm is ~135ms.
 #define ROS_CAN_ID 0x555
+#define STALLED_CODE 255
+#define ACTUATOR_STOP_TIME 100
 
 
 // the cs pin of the version after v1.1 is default to D9
@@ -23,6 +25,7 @@ const int SPI_CS_PIN = 10;
 MCP_CAN CAN(SPI_CS_PIN);                                    // Set CS pin
 
 void setup() {
+  
     SERIAL.begin(115200);
 
     while (CAN_OK != CAN.begin(CAN_500KBPS)) {            // init can bus : baudrate = 500k
@@ -44,170 +47,279 @@ void setup() {
 
 
 void loop() {
+  
     readFromCanBus();
     //readFromSerial();
 }
 
 /* 
-   *  return the current height in mm instead of bytes
+   *  Return the current height in mm instead of bytes
    *  1023b / 150 = 6.82
    *  1b = 0.147mm
    *  1mm = 6.82b
-   *  when casting to byte the value is truncated not rounded
-   *  so 100.1 and 100.9 are both cast to 100
+   *  when casting to byte the value is rounded
+   *  and halves are zeroed which means   
+   *  100.1 is rounded to 100
+   *  100.5 is rounded to 101 
+   *  100.9 is rounded to 101
    */
 byte getCurrentHeight() {
-  return (byte)(analogRead(FEEDBACK) / 6.82);
+  
+  float analogReading = analogRead(FEEDBACK);
+  byte roundedCurrentHeight = round(analogReading / 6.82);
+  return roundedCurrentHeight;
 }
 
 /**
- * There are two safety mechanisms implemented in the raise function.
- * 1.) Overheat protection by limiting the maximum work time to 1min and
- * maintaining 25% duty cycle by having rest time = 4 * work time.
- * 2.) Stall procetion by checking if the previous position feedback value
- * is the same as the next. If the feedback value hasn't changed in 26ms,
- * the actuator has stalled. V=5.7mm/s, S=0.147mm, t=0.026s.
- * I use STALL_TIME instead of 26ms just to be sure that the bit value
- * has changed.
+ * There are four safety mechanisms implemented in the raising function.
+ * 1.) Overheat protection by limiting the maximum work time to 1min 
+ * 2.) Overheat protection by maintaining 25% duty cycle by having rest time = 4 * work time.
+ * 3.) Stall procetion by checking if the previous position feedback value
+ *     is the same as the next. If the feedback value hasn't changed in 26ms,
+ *     the actuator has stalled. V=5.7mm/s, S=0.147mm, t=0.026s.
+ * 4.) Overshoot protection.
+ *     If the current height overshots the goal and is now higher than the goal height, 
+ *     lower the actuator and also continue tracking the work time of the actuator. 
+ *     Otherwise if we have reached the goal height, send the final feedback message and let the actuator rest.
+ *     Otherwise, if the actuator has stalled in a position where currentHeight > goalHeight
+ *     we have already sent the feedback message that it has stalled.
+ *     Now we only need to let the actuator rest without sending any more messages.
+ * 
+ * If this function is called after previously lowering the actuator,
+ * then it has already worked for an "elapsedWorkTime" ammount of time.
+ * This time needs to be accounted for in the time it takes to now raise the actuator
+ * and the time it takes to rest after the operation has finished.
+ * 
+ * This function sends feedback messages only if the current height has changed and
+ *  it is higher than the previously recorded current height. This is done for several reasons:
+ *  - To prevent spamming messages with the same value.
+ *  - To prevent us from sending flip-flop values, i.e when the actuator is in a position between
+ *    two values and the reading changes from one to the other.
+ *  - To prevent us from sending a feedback message where the current height
+ *    is equal to the goal height before we have stopped the actuator in that position.
+ *    Otherwise we risk notifying ROS that we have reached the goal height, overshoot it and
+ *    send new feedback messages, while ROS is already accepting new goals.
+ * 
+ * TODO add a check if the while loop has ended because it reached the goal height
+ *  or because the availableWorkTime was not sufficient to finish the operation.
+ *  
+ * TODO implement feedback messages with more detailed status such as:
+ *  - stalled, timeout, resting, etc.
+ *  
  */
-void raiseTheActuator (byte currentHeight, byte goalHeight) {
-  Serial.println("----Raise----");
+void raiseTheActuator (byte currentHeight, byte goalHeight, unsigned long elapsedWorkTime) {
   
-  // note the time we start raising the actuator
-  unsigned long startTime = millis();
-  int stallCheckPosition = analogRead(FEEDBACK);
+  Serial.println("----Raise----");
+
+  byte currentHeightPreviousValue = currentHeight; // this is in millimeters from 0 to 150
+  unsigned long availableWorkTime = MAX_WORK_TIME - elapsedWorkTime; // Calculate the available work time the actuator has left.
+  unsigned long startTime = millis(); // note the time we start raising the actuator
+  unsigned long stallTimer = millis() + STALL_TIME;
 
   // begin raising the actuator
   digitalWrite(MOTOR_F, HIGH);
   digitalWrite(MOTOR_B, LOW);
+  
+  while (currentHeight < goalHeight && millis() < (startTime + availableWorkTime)) {
 
-  while (currentHeight < goalHeight && millis() < (startTime + MAX_WORK_TIME)) {
+    // stall protection 
+    if (millis() > stallTimer) {
+      stopTheActuator();
+      sendFeedback(STALLED_CODE); //This feedback message will abort the ROS action.
+      Serial.print("Actuator has stalled at: ");
+      Serial.print(getCurrentHeight());
+      Serial.println("mm");
+      break;
+    }
 
-    Serial.print("analogRead = ");
-    Serial.println(analogRead(FEEDBACK));
-    Serial.print("currentHeight = ");
-    Serial.println(currentHeight);
-    Serial.println();
-    
-    // stall check 
-    // TODO commented out for testing. Remove comments when done.
-//        delay(STALL_TIME);
-//        if (stallCheckPosition == analogRead(FEEDBACK)) {
-//          Serial.print("motor has stalled at: ");
-//          Serial.println(stallCheckPosition);
-//          stopTheActuator(0);
-//          break;
-//        }
-//        stallCheckPosition = analogRead(FEEDBACK);
-
-    // TODO what happens when currentHeight overshoots goalHeight
-    // and is higher instead of equal?
     currentHeight = getCurrentHeight();
 
-    // TODO this is a hack because ROS has a sample rate of 10Hz, the arduino is working at 115200baud which is 115kHz
-    // so the ROS server can not keep up with all the messages the arduino is publishing
-    // delete this when you have time to think of a better  solution.
-    delay(150);
+    // send feedback only if the current height has changed and it is not the goal height.
+    // After that reset currentHeightPreviousValue
+    if (currentHeight > currentHeightPreviousValue && currentHeight < goalHeight) {
+      sendFeedback(currentHeight);
+      Serial.print("currentHeight = ");
+      Serial.println(currentHeight);
+      currentHeightPreviousValue = currentHeight;
+      stallTimer = millis() + STALL_TIME;
+    }
 
-    sendFeedback(currentHeight);
+    // without this delay the function doesn't work.
+    // I suspect the loop spins too fast for for the microcontroller to handle.
+    delay(10);
   }
 
-  // Overheat protection
-  unsigned long workTime = millis() - startTime;
+  // Stop the actuator, wait for it to become completely still and get the final position
+  stopTheActuator();
+  delay(ACTUATOR_STOP_TIME);
+  currentHeight = getCurrentHeight();
+
+  // Calculate the time spent working by the actuator
+  unsigned long workTime = millis() - startTime + elapsedWorkTime;
   Serial.print("Worked for: ");
   Serial.print(workTime/1000);
   Serial.println("s");
-  unsigned long restTime = 4 * workTime;
 
-  stopTheActuator(restTime);
+  // Check if position is overshot, successful on goal or failed due to stall.
+  if (currentHeight > goalHeight) {
+    lowerTheActuator(currentHeight, goalHeight, workTime);
+  }
+  else if(currentHeight == goalHeight){
+    sendFeedback(currentHeight);
+    Serial.print("Success! Final position is ");
+    Serial.print(currentHeight);
+    Serial.println("mm");
+    restTheActuator(workTime);
+  }
+  else {
+    Serial.print("Failed! Final position is ");
+    Serial.print(currentHeight);
+    Serial.println("mm");
+    restTheActuator(workTime);
+  }
 }
 
 
 /**
- * There are two safety mechanisms implemented in the lower function.
- * 1.) Overheat protection by limiting the maximum work time to 1min and
- * maintaining 25% duty cycle by having rest time = 4 * work time.
- * 2.) Stall procetion by checking if the previous position feedback value
- * is the same as the next. If the feedback value hasn't changed in 26ms,
- * the actuator has stalled. V=5.7mm/s, S=0.147mm, t=0.026s.
- * I use delay(50) instead of 26ms just to be sure that the bit value
- * has changed.
+ * There are four safety mechanisms implemented in the lower function.
+ * 1.) Overheat protection by limiting the maximum work time to 1min 
+ * 2.) Overheat protection by maintaining 25% duty cycle by having rest time = 4 * work time.
+ * 3.) Stall procetion by checking if the previous position feedback value
+ *     is the same as the next. If the feedback value hasn't changed in 26ms,
+ *     the actuator has stalled. V=5.7mm/s, S=0.147mm, t=0.026s.
+ * 4.) Overshoot protection.
+ *     If the current height overshots the goal and is now lower than the goal height, 
+ *     raise the actuator and also continue tracking the work time of the actuator. 
+ *     Otherwise if we have reached the goal height, send the final feedback message and let the actuator rest.
+ *     Otherwise, if the actuator has stalled in a position where currentHeight > goalHeight
+ *     we have already sent the feedback message that it has stalled.
+ *     Now we only need to let the actuator rest without sending any more messages.
+ * 
+ * If this function is called after previously raising the actuator,
+ * then it has already worked for an "elapsedWorkTime" ammount of time.
+ * This time needs to be accounted for in the time it takes to now lower the actuator
+ * and the time it takes to rest after the operation has finished.
+ * 
+ * This function sends feedback messages only if the current height has changed and
+ *  it is lower than the previously recorded current height. This is done for several reasons:
+ *  - To prevent spamming messages with the same value.
+ *  - To prevent us from sending flip-flop values, i.e when the actuator is in a position between
+ *    two values and the reading changes from one to the other.
+ *  - To prevent us from sending a feedback message where the current height
+ *    is equal to the goal height before we have stopped the actuator in that position.
+ *    Otherwise we risk notifying ROS that we have reached the goal height, overshoot it and
+ *    send new feedback messages, while ROS is already accepting new goals.
+ * 
+ * TODO add a check if the while loop has ended because it reached the goal height
+ *  or because the availableWorkTime was not sufficient to finish the operation.
+ *  
+ * TODO implement feedback messages with more detailed status such as:
+ *  - stalled, timeout, resting, etc.
  */
-void lowerTheActuator (byte currentHeight, byte goalHeight) {
+void lowerTheActuator (byte currentHeight, byte goalHeight, unsigned long elapsedWorkTime) {
+  
   Serial.println("----Lower----");
   
-  // note the time we start lowering the actuator
-  unsigned long startTime = millis();
-  int stallCheckPosition = analogRead(FEEDBACK);
+  byte currentHeightPreviousValue = currentHeight; // this is in millimeters from 0 to 150
+  unsigned long availableWorkTime = MAX_WORK_TIME - elapsedWorkTime; // Calculate the available work time the actuator has left.
+  unsigned long startTime = millis(); // note the time we start raising the actuator
+  unsigned long stallTimer = millis() + STALL_TIME;
   
   // begin lowering the actuator
   digitalWrite(MOTOR_F, LOW);
   digitalWrite(MOTOR_B, HIGH);
 
-  while (currentHeight > goalHeight && millis() < (startTime + MAX_WORK_TIME)) {
+  while (currentHeight > goalHeight && millis() < (startTime + availableWorkTime)) {
 
-    Serial.print("analogRead = ");
-    Serial.println(analogRead(FEEDBACK));
-    Serial.print("currentHeight = ");
-    Serial.println(currentHeight);
-    Serial.println();
-    
     // stall protection
-    // TODO commented out for testing
-//        delay(STALL_TIME);
-//        if (stallCheckPosition == analogRead(FEEDBACK)) {
-//          Serial.print("motor has stalled at: ");
-//          Serial.println(stallCheckPosition);
-//          stopTheActuator(0);
-//          break;
-//        }
-//        stallCheckPosition = analogRead(FEEDBACK);
+    if (millis() > stallTimer) {
+      stopTheActuator();
+      sendFeedback(STALLED_CODE); //This feedback message will abort the ROS action.
+      Serial.print("Actuator has stalled at: ");
+      Serial.print(getCurrentHeight());
+      Serial.println("mm");
+      break;
+    }
 
-    // TODO what happens when currentHeight overshoots goalHeight
-    // and is lower instead of equal?
     currentHeight = getCurrentHeight();
+    
+    // send feedback only if the current height has changed and it is not the goal height.
+    // After that reset currentHeightPreviousValue and stallTimer
+    if (currentHeight < currentHeightPreviousValue &&  currentHeight > goalHeight) {
+      sendFeedback(currentHeight);
+      Serial.print("currentHeight = ");
+      Serial.println(currentHeight);
+      currentHeightPreviousValue = currentHeight;
+      stallTimer = millis() + STALL_TIME;
+    }
 
-    // TODO this is a hack because ROS has a sample rate of 10Hz, the arduino is working at 115200baud which is 115kHz
-    // so the ROS server can not keep up with all the messages the arduino is publishing
-    // delete this when you have time to think of a better  solution.
-    delay(150);
-
-    sendFeedback(currentHeight);
+    // without this delay the function doesn't work.
+    // I suspect the loop spins too fast for for the microcontroller to handle.
+    // TODO figure out why the fuction does not work without this delay.
+    delay(10); 
   }
 
-  // Overheat protection
-  unsigned long workTime = millis() - startTime;
+  // Stop the actuator, wait for it to become completely still and get the final position
+  stopTheActuator();
+  delay(ACTUATOR_STOP_TIME);
+  currentHeight = getCurrentHeight();
+
+  // Calculate the time spent working by the actuator
+  unsigned long workTime = millis() - startTime + elapsedWorkTime;
   Serial.print("Worked for: ");
   Serial.print(workTime/1000);
   Serial.println("s");
-  unsigned long restTime = 4 * workTime;
-  
-  stopTheActuator(restTime);
+
+  // Check if position is overshot, successful on goal or failed due to stall.
+  if (currentHeight < goalHeight) {
+    raiseTheActuator(currentHeight, goalHeight, workTime);
+  }
+  else if(currentHeight == goalHeight){
+    sendFeedback(currentHeight);
+    Serial.print("Success! Final position is ");
+    Serial.print(currentHeight);
+    Serial.println("mm");
+    restTheActuator(workTime);
+  }
+  else {
+    Serial.print("Failed! Final position is ");
+    Serial.print(currentHeight);
+    Serial.println("mm");
+    restTheActuator(workTime);
+  }
 }
 
 
 /**
- * Stop the actuator and print the time it will rest.
+ * Stop the actuator immediatelly.
  */
-void stopTheActuator(unsigned long restTime) {
-
-  // stop the actuator
+void stopTheActuator() {
+  
   digitalWrite(MOTOR_F, LOW);
   digitalWrite(MOTOR_B, LOW);
+}
 
-  // send feedback of the final seat height
-  // TODO commented out for testing purposes
-  // What happens if the actuator overshoots the desired position before it stops?
+/**
+ * Calculate the appropriate ammount of rest time from the given work time.
+ * Given that the duty cycle of the actuator is 25%, that means it must rest for
+ * 4 times the ammount of time spent working.
+ * Stop the execution of the program for "restTime" ammount of time
+ * and print "restTime" to the Serial monitor for debugging purposes.
+ * 
+ * TODO replace this with a function which checks for incoming messages and
+ *      returns the current height with status 'C' for cooldown. 
+ *      Next version of this function should also return the time left to rest
+ * 
+ * TODO send feedback to ROS when resting is complete.
+ */
+void restTheActuator(unsigned long workTime) {
   
-  //sendFeedback(getCurrentHeight());
-  
-  // Print the resting time to the Serial output
+  unsigned long restTime = 4 * workTime;
   Serial.print("Resting for: ");
   Serial.print(restTime/1000);
   Serial.println("s");
-  delay(restTime);  // replace with function which checks for incoming messages and
-                    // returns the current height with status 'C' for cooldown. 
-                    // Next version of this function should return the time left to rest
+  delay(restTime); 
+  Serial.println("Resting complete.");
 }
 
 /**
@@ -215,13 +327,13 @@ void stopTheActuator(unsigned long restTime) {
  * The feedback message contains one byte type number 
  * from 0 to 150 indicating the current height of the 
  * seat in millimeters.
+ * 
+ * TODO expand the data length to include a status byte after the first byte which is the height
  */
 void sendFeedback(byte currentHeight) {
-  // TODO expand the data length to include a status byte after the first byte which is the height
-  unsigned char feedbackMsg[1] = {currentHeight};
-
-  // uC send data:  0x111 = id, 0 = standard frame, 1 = data length, feedbackMsg = data buf
-  CAN.sendMsgBuf(0x111, 0, 1, feedbackMsg);
+  
+  unsigned char feedbackMsg[1] = {currentHeight}; 
+  CAN.sendMsgBuf(0x111, 0, 1, feedbackMsg); // uC send data:  0x111 = id, 0 = standard frame, 1 = data length, feedbackMsg = data buf
 }
 
 /**
@@ -242,9 +354,12 @@ void readFromSerial() {
         SERIAL.println(currentHeight);
         SERIAL.println();
 
-        if (currentHeight < goalHeight) raiseTheActuator(currentHeight, goalHeight);
-        if (currentHeight > goalHeight) lowerTheActuator(currentHeight, goalHeight);
-        if (currentHeight == goalHeight) stopTheActuator(0);
+        if (currentHeight < goalHeight) raiseTheActuator(currentHeight, goalHeight, 0);
+        if (currentHeight > goalHeight) lowerTheActuator(currentHeight, goalHeight, 0);
+        if (currentHeight == goalHeight) {
+          stopTheActuator();
+          sendFeedback(currentHeight);
+        }
 
         // ToDo send current height to CAN BUS
 
@@ -295,10 +410,12 @@ void readFromCanBus() {
       SERIAL.print("Current Height: ");
       SERIAL.println(currentHeight);
   
-      // ToDo test all cases
-      if (currentHeight == goalHeight) stopTheActuator(0);
-      else if (currentHeight < goalHeight) raiseTheActuator(currentHeight, goalHeight);
-      else if (currentHeight > goalHeight) lowerTheActuator(currentHeight, goalHeight);
+      if (currentHeight == goalHeight) {
+        stopTheActuator();
+        sendFeedback(currentHeight);
+      }
+      else if (currentHeight < goalHeight) raiseTheActuator(currentHeight, goalHeight, 0);
+      else if (currentHeight > goalHeight) lowerTheActuator(currentHeight, goalHeight, 0);
     }
     else {
       Serial.print("Ignoring message with id = ");

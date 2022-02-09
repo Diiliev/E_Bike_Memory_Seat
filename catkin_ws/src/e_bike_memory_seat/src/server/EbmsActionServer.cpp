@@ -44,6 +44,13 @@ class SeatHeightAdjuster {
         }
 
         // read the current height 
+        // -1 means the function has failed to read the message
+        // 255 means the actuator has stalled and the operation has failed.
+        // In the arduino IDE, a byte typed variable is used to store the height.
+        // That is equivalent to an uint8_t variable, i.e values range from 0 to 255.
+        // Since we can't send -1 from the arduino, all values above 150
+        // (which is the nominal height of the actuator) are reserved as "Special"
+        // values and 255 means the actuator has stalled.
         feedback.currentHeight = readMessageFromCanWithId(CAN_ID_TO_READ);
         ROS_INFO("feedback.currentHeight=%d",feedback.currentHeight);
 
@@ -55,21 +62,32 @@ class SeatHeightAdjuster {
             return;
         }
 
+        if (feedback.currentHeight == 255) {
+            ROS_ERROR("The actuator has stalled.");
+            ROS_WARN("%s not completed", actionName.c_str());
+            actionServer.setAborted();
+            return;
+        }
+
         // keep reading and publishing the feedback messages sent from the microcontroller
         // until the feedback height is equal to the goal wanted height
         // or until the action is preempted
-        // or until the microcontroller returns error with -1
+        // or until the microcontroller returns an error with a number higher than 150.
         // TODO add timer condition
         // TODO what if feedback overshoots goal and has to go in the other direction?
         while (feedback.currentHeight != goal->wantedHeight) {
-            if (actionServer.isPreemptRequested()
-                || !ros::ok()
-                || feedback.currentHeight == -1) {
-
+            if (actionServer.isPreemptRequested() || !ros::ok()) {
                 ROS_WARN("%s was preempted", actionName.c_str());
                 actionServer.setPreempted();
                 break;
             }
+            if (feedback.currentHeight == 255) {
+                ROS_ERROR("The actuator has stalled.");
+                ROS_WARN("%s not completed", actionName.c_str());
+                actionServer.setAborted();
+                return;
+            }
+
             feedback.currentHeight = readMessageFromCanWithId(CAN_ID_TO_READ);
             actionServer.publishFeedback(feedback);
             rate.sleep();

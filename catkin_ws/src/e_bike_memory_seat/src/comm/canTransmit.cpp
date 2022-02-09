@@ -56,7 +56,9 @@ bool writeMessageToCan(int height, int canIdToSend) {
 /**
  * Read a message from the CAN bus with can_id: canIdToRead.
  * - Returns current seat height in millimeters on success.
- * - Returns -1 on failure.
+ * - Returns -1 on failure to read.
+ * - If the feedback value is 255 that means the actuator has stalled
+ *   and the operation has failed.
  */
 int readMessageFromCanWithId(int canIdToRead) {
 
